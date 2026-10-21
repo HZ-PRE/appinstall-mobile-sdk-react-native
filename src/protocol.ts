@@ -81,7 +81,9 @@ export function immutable(r?: InstallAttributionResponse): boolean {
     !!r?.isFinal &&
     !!r.installId &&
     r.reason !== "retry_window_expired" &&
-    ((r.attributionStatus === "matched" && r.attributed && !!r.deepLinkData) ||
+    ((r.attributionStatus === "matched" &&
+      r.attributed &&
+      (!!r.deepLinkData || r.reason === "already_matched")) ||
       (r.attributionStatus === "unmatched" && !r.attributed))
   );
 }
@@ -120,6 +122,21 @@ export function parseResult(raw: unknown): InstallAttributionResponse {
     ...(typeof r.retryAfterMs === "number" && Number.isFinite(r.retryAfterMs)
       ? { retryAfterMs: r.retryAfterMs }
       : {}),
+  };
+}
+export function previouslyMatched(
+  installId: string,
+): InstallAttributionResponse {
+  return {
+    installId,
+    attributed: true,
+    attributionStatus: "matched",
+    attributionMethod: "none",
+    attributionScope: "none",
+    isFinal: true,
+    resultVersion: 0,
+    reason: "already_matched",
+    deepLinkData: null,
   };
 }
 export function pending(

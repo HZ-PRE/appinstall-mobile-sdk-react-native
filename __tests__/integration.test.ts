@@ -58,6 +58,7 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
         );
         const c = {
           ...config,
+          deviceId: config.deviceId + "-" + mode,
           ...(["windows", "macos"].includes(mode)
             ? {
                 desktopAdapter: {
@@ -82,7 +83,11 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
           sdk.dispose();
           sdk = new AppInstallSDK();
           const cached = await sdk.init(c);
-          expect(cached).toEqual(first);
+          expect(cached.reason).toBe("already_matched");
+          expect(cached.attributed).toBe(true);
+          expect(cached.installId).toBe(first.installId);
+          expect(cached.deepLinkData).toBeNull();
+          expect(await sdk.getInstallData()).toBeNull();
           expect(request.mock.calls.length).toBe(calls);
           loseEventAcknowledgement = true;
           expect(await sdk.trackEvent("rn_e2e", { source: mode })).toBe(true);
@@ -90,6 +95,13 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
           expect(sdk.getQueuedEventCount()).toBe(1);
           await sdk.flushEvents();
           expect(sdk.getQueuedEventCount()).toBe(0);
+          await sdk.clearData();
+          // Reinstall creates a new instance UUID, but the same device identity
+          // must resolve to the original committed server installation.
+          sdk = new AppInstallSDK();
+          const reinstalled = await sdk.init(c);
+          expect(reinstalled.installId).toBe(first.installId);
+          expect(reinstalled.deepLinkData).toEqual(first.deepLinkData);
           await sdk.clearData();
         } finally {
           sdk.dispose();

@@ -48,6 +48,9 @@ vi.mock("react-native-device-info", () => ({
           ? "15.0"
           : "14",
     getModel: () => "Pixel 8",
+    getBrand: () => "Google",
+    getDeviceSync: () => "shiba",
+    getDeviceId: () => "Mac14,7",
     getApplicationName: () => "AppInstallTest",
     supportedAbis: async () => ["arm64-v8a", "armeabi-v7a"],
   },

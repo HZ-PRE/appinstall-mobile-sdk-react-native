@@ -41,8 +41,10 @@ await AppInstall.trackEvent('signup', {channel: 'app'});
 ```
 
 `init` 超过初始等待时间返回 pending，后台仍会完成已有请求。`getAttribution()`
-获取当前结果或触发重试；`getInstallData()` 仅返回已提交最终结果中的安装参数。
-最终结果无本地 TTL，同一安装再次获取不请求网络。`retry_window_expired` 不视为不可变最终结果。
+获取当前结果或触发重试；`getInstallData()` 仅返回当前 SDK 会话收到的最终安装参数，仅读内存、不触发网络。
+安装参数及完整响应不再落盘。仅持久化最终匹配成功标记及必要的应用、安装身份。重启后返回 attributed=true、isFinal=true、reason=already_matched、deepLinkData=null，不请求安装归因接口，也不重放安装参数回调。本地状态不恢复匹配算法或版本：attributionMethod/attributionScope 为 none，resultVersion 为 0。`retry_window_expired` 不视为不可变最终结果。
+
+待定结果不会记为成功，未完成归因所需的信号和凭证仍用于重试；最终未匹配不阻止下次启动查询。升级时清除旧参数缓存，clearData() 会删除成功标记。事件上报与新深链解析独立运行。
 
 ## 平台设置
 
@@ -81,7 +83,7 @@ await AppInstall.trackEvent('signup', {channel: 'app'});
 
 ## Windows / macOS
 
-共享 v2 状态机、概率信号、最终缓存，支持 `launch_uri`、加密剪贴板和 `install_file`。
+共享 v2 状态机、概率信号、成功标记，支持 `launch_uri`、加密剪贴板和 `install_file`。
 React Native 桌面宿主通过 `createDesktopAdapter` 绑定自己使用的文件系统和剪贴板模块，
 具体示例见 `examples/DesktopAdapter.ts`。手机接入不需要这些桌面依赖。
 

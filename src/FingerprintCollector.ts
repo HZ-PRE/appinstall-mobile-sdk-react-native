@@ -4,6 +4,23 @@ import { normalizeLanguageTag } from "./languageTag";
 import { deadline } from "./protocol";
 import type { DeviceFingerprint } from "./types";
 export class FingerprintCollector {
+  static formatEquipment(parts: string[]): string | undefined {
+    const value = [
+      ...new Set(
+        parts
+          .map((p) => p.replace(/[\s\x00-\x1f\x7f]+/g, " ").trim())
+          .filter(
+            (p) =>
+              p &&
+              !["unknown", "null", "undefined", "n/a"].includes(
+                p.toLowerCase(),
+              ),
+          ),
+      ),
+    ].join(" ");
+    return value ? Array.from(value).slice(0, 128).join("").trim() : undefined;
+  }
+
   static async collect(): Promise<DeviceFingerprint> {
     const screen = Dimensions.get("screen"),
       ratio = screen.scale;
@@ -76,7 +93,28 @@ export class FingerprintCollector {
       if (normalizedVersion !== "Unknown")
         signals.osVersion = normalizedVersion;
     }
+    // Use model metadata only; never getDeviceName (user-editable hostname) or unique IDs.
+    let equipment: string | undefined;
+    try {
+      equipment = this.formatEquipment(
+        platform === "android"
+          ? [
+              DeviceInfo.getBrand(),
+              DeviceInfo.getModel(),
+              DeviceInfo.getDeviceSync(),
+            ]
+          : ["ios", "macos"].includes(platform)
+            ? ["Apple", DeviceInfo.getModel(), DeviceInfo.getDeviceId()]
+            : [
+                platform === "windows" ? "Windows" : platform,
+                normalizedVersion,
+              ],
+      );
+    } catch {
+      // Optional metadata must not prevent installation attribution.
+    }
     return {
+      ...(equipment ? { equipment } : {}),
       userAgent: `${DeviceInfo.getApplicationName()}/${appVersion} ${platform}/${normalizedVersion}`,
       platform,
       platformVersion: normalizedVersion,

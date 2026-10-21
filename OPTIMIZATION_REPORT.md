@@ -1,3 +1,5 @@
+后续变更：安装参数持久化已取消，当前行为与验证见 [STATUS_ONLY_REPORT.md](STATUS_ONLY_REPORT.md)。以下为之前版本的优化记录。
+
 # React Native SDK 2.0.1 优化验收记录
 
 日期：2026-10-21（Asia/Shanghai）

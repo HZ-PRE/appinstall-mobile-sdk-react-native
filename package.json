@@ -1,6 +1,6 @@
 {
   "name": "@appinstall/mobile-sdk-react-native",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "description": "AppInstall React Native SDK for the current Go v2 attribution protocol",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

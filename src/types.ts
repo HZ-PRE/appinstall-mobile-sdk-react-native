@@ -9,7 +9,7 @@ export interface AppInstallConfig {
   attributionWindowHours?: number;
   initialAttributionTimeoutMs?: number;
   attributionFallbackURLs?: string[];
-  /** Host-provided identifier after consent; never collected automatically. */
+  /** Host-provided identifier after consent; preferred for server installation deduplication. Never collected automatically. */
   deviceId?: string;
   desktopReceiptPath?: string;
   /** Windows/macOS IO; mobile uses the bundled native bridge. */
@@ -44,6 +44,8 @@ export interface NavigationContainerRefLike {
 }
 export interface DeviceFingerprint {
   userAgent: string;
+  /** Human-readable brand/model/device code; not a unique device identifier. */
+  equipment?: string;
   platform: string;
   platformVersion?: string;
   appVersion?: string;

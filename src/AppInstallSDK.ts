@@ -172,7 +172,7 @@ export class AppInstallSDK {
         if (epoch !== this.epoch) return;
         const changed = JSON.stringify(this.last) !== JSON.stringify(result);
         this.last = result;
-        if (immutable(result) && result.attributed) {
+        if (immutable(result) && result.attributed && result.deepLinkData) {
           if (!this.context.getActive())
             await this.context.recordDeepLinkOpen(result.deepLinkData?.linkId);
           if (epoch !== this.epoch) return;
@@ -235,10 +235,12 @@ export class AppInstallSDK {
   }
   private deliverDeferred(): void {
     if (
+      !this.config ||
       this.delivered ||
       !this.deferred ||
       !immutable(this.last) ||
-      !this.last?.attributed
+      !this.last?.attributed ||
+      !this.last.deepLinkData
     )
       return;
     this.delivered = true;
@@ -273,8 +275,12 @@ export class AppInstallSDK {
     return this.manager.refresh();
   }
   async getInstallData(): Promise<DeepLinkData | null> {
-    const result = await this.getAttribution();
-    return immutable(result) ? (result.deepLinkData ?? null) : null;
+    // Memory only: this getter never starts an attribution request.
+    if (!this.config) return null;
+    const result = this.last;
+    return immutable(result) && result?.deepLinkData
+      ? JSON.parse(JSON.stringify(result.deepLinkData))
+      : null;
   }
   async getInstallId(): Promise<string | null> {
     return this.last?.installId ?? null;

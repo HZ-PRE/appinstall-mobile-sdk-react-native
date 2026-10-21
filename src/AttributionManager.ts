@@ -7,7 +7,13 @@ import type {
 } from "./types";
 import { Sources, withScopeLock } from "./Sources";
 import { Transport, retryable } from "./Transport";
-import { deadline, immutable, parseResult, pending } from "./protocol";
+import {
+  deadline,
+  immutable,
+  parseResult,
+  pending,
+  previouslyMatched,
+} from "./protocol";
 import { SDK_NAME, SDK_VERSION } from "./version";
 interface State {
   scope: string;
@@ -17,7 +23,8 @@ interface State {
   sourceStates?: Record<string, string>;
   evidence?: unknown[];
   invalidSource?: boolean;
-  response?: InstallAttributionResponse;
+  matched?: boolean;
+  installId?: string;
 }
 export class AttributionManager {
   private state?: State;
@@ -91,7 +98,33 @@ export class AttributionManager {
             !/^[a-f0-9-]{36}$/i.test(restored.instanceId)
           )
             throw new Error("Invalid installation state");
-          if (!raw) await this.source.writeState(JSON.stringify(restored));
+          // Remove old response payloads; migrate only a committed success marker.
+          const old = (restored as State & { response?: unknown }).response;
+          if (old !== undefined) {
+            let result: InstallAttributionResponse | undefined;
+            try {
+              result = parseResult(old);
+            } catch {}
+            delete (restored as State & { response?: unknown }).response;
+            restored.matched =
+              !!result && immutable(result) && result.attributed;
+            if (result) restored.installId = result.installId;
+            if (restored.matched) {
+              for (const key of Object.keys(restored)) {
+                if (
+                  !["scope", "instanceId", "matched", "installId"].includes(key)
+                )
+                  delete (restored as unknown as Record<string, unknown>)[key];
+              }
+            }
+          }
+          if (
+            restored.matched === true &&
+            (typeof restored.installId !== "string" || !restored.installId)
+          )
+            throw new Error("Invalid matched installation marker");
+          if (!raw || old !== undefined)
+            await this.source.writeState(JSON.stringify(restored));
           if (this.stopped) return;
           this.state = restored;
           this.source.restore(restored.sourceSnapshot);
@@ -99,8 +132,8 @@ export class AttributionManager {
       }
       if (this.stopped || !this.state) return pending("stopped");
       const state = this.state;
-      if (state.response && immutable(parseResult(state.response)))
-        return await this.deliver(parseResult(state.response));
+      if (state.matched === true)
+        return await this.deliver(previouslyMatched(state.installId!));
       const needsSources =
         !state.sourceStates ||
         Object.values(state.sourceStates).includes("pending");
@@ -145,8 +178,13 @@ export class AttributionManager {
       if (this.stopped) return pending("stopped");
       // Commit to disk before exposing a final result. A failed write remains retryable.
       const next: State = immutable(result)
-        ? { scope: state.scope, instanceId: state.instanceId, response: result }
-        : { ...state, response: result };
+        ? {
+            scope: state.scope,
+            instanceId: state.instanceId,
+            matched: result.attributed,
+            installId: result.installId,
+          }
+        : { ...state, matched: false, installId: result.installId };
       await this.source.writeState(JSON.stringify(next));
       this.state = next;
       if (this.stopped) return pending("stopped");

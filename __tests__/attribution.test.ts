@@ -80,7 +80,10 @@ it("concurrent requests coalesce, commit precedes response, final data survives 
   expect(values[0]).toEqual(finalResult);
   expect(request).toHaveBeenCalledTimes(1);
   const saved = JSON.parse(native.states.get("app")!);
-  expect(saved.response).toEqual(finalResult);
+  expect(saved.response).toBeUndefined();
+  expect(saved.matched).toBe(true);
+  expect(saved.installId).toBe(finalResult.installId);
+  expect(JSON.stringify(saved)).not.toContain("customParameters");
   expect(saved.body).toBeUndefined();
   expect(saved.sourceSnapshot).toBeUndefined();
   values[0].deepLinkData!.customParameters!.inviter = "mutated";
@@ -88,7 +91,10 @@ it("concurrent requests coalesce, commit precedes response, final data survives 
     "alice",
   );
   const restart = manager();
-  await restart.m.refresh();
+  const restored = await restart.m.refresh();
+  expect(restored.reason).toBe("already_matched");
+  expect(restored.attributed).toBe(true);
+  expect(restored.deepLinkData).toBeNull();
   expect(restart.request).not.toHaveBeenCalled();
 });
 it("pending results retry and reuse the same persisted installation ID", async () => {
@@ -211,6 +217,7 @@ it("duplicate Play token is invalid explicit evidence, retries are capped", asyn
 });
 it("fingerprint uses full physical display and current optional signals", async () => {
   const fp = await FingerprintCollector.collect();
+  expect(fp.equipment).toBe("Google Pixel 8 shiba");
   expect(fp.screenWidth).toBe(1080);
   expect(fp.screenHeight).toBe(2400);
   expect(fp.signals).toMatchObject({
@@ -221,6 +228,31 @@ it("fingerprint uses full physical display and current optional signals", async 
   });
   expect(fp.timezone).toBe("Asia/Shanghai");
   expect(fp.language).toBe("zh-CN");
+});
+it("equipment is bounded model metadata and travels in the installation body", async () => {
+  expect(
+    FingerprintCollector.formatEquipment([" HUAWEI ", "BRQ-AN00", "HWBRQ"]),
+  ).toBe("HUAWEI BRQ-AN00 HWBRQ");
+  expect(
+    FingerprintCollector.formatEquipment(["unknown", "", "N/A"]),
+  ).toBeUndefined();
+  expect(
+    FingerprintCollector.formatEquipment([
+      "Apple",
+      "Apple",
+      "iPhone\n15,2\x00",
+    ]),
+  ).toBe("Apple iPhone 15,2");
+  expect(
+    Array.from(FingerprintCollector.formatEquipment(["型".repeat(200)])!)
+      .length,
+  ).toBe(128);
+  const { m, request } = manager();
+  await m.refresh();
+  expect(request.mock.calls[0][1]).toHaveProperty(
+    "equipment",
+    "Google Pixel 8 shiba",
+  );
 });
 it("HTTP failover is install-only and permanent client errors never fail over", async () => {
   const fetcher = vi
@@ -369,7 +401,7 @@ it("callback failures do not change successful attribution and direct context wi
 it("no final response is published until durable result persistence succeeds", async () => {
   const original = native.writeState.getMockImplementation()!;
   native.writeState.mockImplementation(async (scope, value) => {
-    if (JSON.parse(value).response) throw new Error("disk full");
+    if (JSON.parse(value).matched) throw new Error("disk full");
     await original(scope, value);
   });
   const { m, accept } = manager();
@@ -838,4 +870,102 @@ it("disposing during queue format recovery preserves events for the next startup
   } as unknown as Transport);
   await restored.load();
   expect(restored.count).toBe(1);
+});
+
+it("old success payload is scrubbed to a marker without HTTP or parameter delivery", async () => {
+  native.states.set(
+    "app",
+    JSON.stringify({
+      scope: "app",
+      instanceId: crypto.randomUUID(),
+      response: finalResult,
+    }),
+  );
+  const { m, request, accept } = manager();
+  const result = await m.refresh();
+  expect(result.reason).toBe("already_matched");
+  expect(result.attributed).toBe(true);
+  expect(result.deepLinkData).toBeNull();
+  expect(request).not.toHaveBeenCalled();
+  expect(native.readClipboard).not.toHaveBeenCalled();
+  expect(native.readReferrer).not.toHaveBeenCalled();
+  expect(accept.mock.calls[0][0].deepLinkData).toBeNull();
+  const saved = JSON.parse(native.states.get("app")!);
+  expect(Object.keys(saved).sort()).toEqual(
+    ["scope", "instanceId", "matched", "installId"].sort(),
+  );
+  expect(native.states.get("app")).not.toContain("alice");
+});
+it("a provisional response never writes business parameters or a successful marker", async () => {
+  vi.useFakeTimers();
+  const { m } = manager(
+    vi.fn().mockResolvedValue({ ...finalResult, isFinal: false }),
+  );
+  expect((await m.refresh()).isFinal).toBe(false);
+  for (const [, raw] of native.writeState.mock.calls) {
+    expect(raw).not.toContain("customParameters");
+    expect(raw).not.toContain("alice");
+  }
+  expect(JSON.parse(native.states.get("app")!).matched).toBe(false);
+});
+it("restart exposes success only, never replays installation parameters or starts HTTP", async () => {
+  const fetcher = vi.fn(async () => ({
+    ok: true,
+    json: async () => finalResult,
+  }));
+  vi.stubGlobal("fetch", fetcher);
+  const first = new AppInstallSDK();
+  sdks.push(first);
+  await first.init(config);
+  expect((await first.getInstallData())?.customParameters?.inviter).toBe(
+    "alice",
+  );
+  first.dispose();
+  expect(await first.getInstallData()).toBeNull();
+  const next = new AppInstallSDK();
+  sdks.push(next);
+  const callback = vi.fn();
+  next.onDeferredDeepLink(callback);
+  const restored = await next.init(config);
+  expect(restored.reason).toBe("already_matched");
+  for (let i = 0; i < 20; i++) {
+    expect(await next.getInstallData()).toBeNull();
+    expect((await next.getAttribution()).attributed).toBe(true);
+  }
+  expect(fetcher).toHaveBeenCalledTimes(1);
+  expect(callback).not.toHaveBeenCalled();
+  await next.clearData();
+  await next.init(config);
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
+it("final unmatched may query on a new launch, without persisting a final result payload", async () => {
+  const first = manager(
+    vi.fn().mockResolvedValue({
+      ...finalResult,
+      attributed: false,
+      attributionStatus: "unmatched",
+      deepLinkData: null,
+    }),
+  );
+  await first.m.refresh();
+  await first.m.drain();
+  expect(JSON.parse(native.states.get("app")!).matched).toBe(false);
+  const second = manager();
+  await second.m.refresh();
+  expect(second.request).toHaveBeenCalledTimes(1);
+});
+it("a failed marker write cannot stop retries or report success", async () => {
+  vi.useFakeTimers();
+  const write = native.writeState.getMockImplementation()!;
+  native.writeState.mockImplementation(async (scope, raw) => {
+    if (JSON.parse(raw).matched) throw new Error("disk full");
+    await write(scope, raw);
+  });
+  const { m, request } = manager();
+  expect((await m.refresh()).attributed).toBe(false);
+  expect(JSON.parse(native.states.get("app")!).matched).not.toBe(true);
+  native.writeState.mockImplementation(write);
+  await vi.advanceTimersByTimeAsync(1201);
+  expect((await m.refresh()).attributed).toBe(true);
+  expect(request).toHaveBeenCalledTimes(2);
 });
