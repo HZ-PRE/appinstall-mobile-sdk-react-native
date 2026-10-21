@@ -1,0 +1,107 @@
+## <small>1.6.2 (2026-10-19)</small>
+
+* fix(fingerprint): send the device language as language-region (#8) ([7c0569e](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/7c0569e)), closes [#8](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/8) [en_ES_#u-fw-mon-mu-celsius](https://github.com/en_ES_/issues/u-fw-mon-mu-celsius)
+
+## <small>1.6.1 (2026-09-10)</small>
+
+* fix(deeplink): keep URL parameters on a direct open (#7) ([635a23b](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/635a23b)), closes [#7](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/7)
+
+## 1.6.0 (2026-06-10)
+
+* feat(sdk): report SDK name + version (SIT-235 · React Native) (#6) ([a4ebc5d](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/a4ebc5d)), closes [#6](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/6)
+
+## 1.5.0 (2026-06-10)
+
+* feat: autoTrackNavigation + last-click attribution context (SIT-237) (#5) ([c3537bf](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/c3537bf)), closes [#5](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/5)
+
+## 1.4.0 (2026-05-04)
+
+* ci: drop flaky 'npm install -g npm@latest' self-upgrade step (#4) ([62cbc18](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/62cbc18)), closes [#4](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/4) [#2](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/2)
+* Merge pull request #2 from AppInstall/feat/app-token ([b89b060](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/b89b060)), closes [#2](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/2)
+* update packages ([98b32fb](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/98b32fb))
+* docs: surface appToken in llms.txt and README ([46c277f](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/46c277f))
+* feat: add appToken config option for Cloud organic-install attribution ([bdb7a13](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/bdb7a13)), closes [AppInstall/cloud#76](https://github.com/AppInstall/cloud/issues/76)
+
+## 1.3.0 (2026-03-17)
+
+* ci: add semantic-release with OIDC trusted publishing to npm ([8d634bc](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/8d634bc))
+* feat: add setExternalUserId for user attribution on shared links ([deed87c](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/deed87c))
+* feat: add trackRevenue() convenience method for standardized revenue events ([53438c2](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/53438c2))
+
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [1.2.0] - 2026-03-03
+### Added
+- `externalUserId` option in `CreateLinkOptions` — identifies the app user creating the link, enabling per-user deduplication and share attribution
+- `deduplicated` boolean in `CreateLinkResult` — indicates when an existing link was returned instead of creating a new one (per-user deduplication)
+
+## [1.1.8] - 2026-02-27
+### Changed
+- Optimized README and npm package description for LLM discoverability
+- Added competitor positioning keywords and cross-SDK references
+- Added `firebase-dynamic-links` npm keyword
+
+## [1.1.7] - 2026-02-27
+### Fixed
+- Corrected GitHub repository, bugs, and homepage URLs in package.json
+
+## [1.1.6] - 2026-02-26
+### Added
+- `llms.txt` — LLM-optimized integration reference shipped with the published package, enabling AI coding assistants to generate accurate integration code directly from node_modules
+
+## [1.1.5] - 2026-02-13
+### Fixed
+- Removed accidental self-referencing `file:` dependency in published package that prevented `npm install` from working
+
+## [1.1.3] - 2026-02-12
+### Fixed
+- Replaced `new URL()` and `URLSearchParams` usage with manual string parsing — `URL.pathname` is not implemented in React Native's Hermes engine, which caused `parseURL()` to crash silently and skip server-side deep link resolution entirely
+- Rounded screen dimensions to integers in `FingerprintCollector` — Android's `Dimensions.get('window')` returns floats (e.g. `434.717`) which caused PostgreSQL INSERT errors on INTEGER columns in the install endpoint
+
+## [1.1.2] - 2026-02-12
+### Added
+- `createLink()` method for creating short links programmatically from mobile apps via the AppInstall API
+- `CreateLinkOptions` type — accepts optional `templateId`, `templateSlug`, `deepLinkParameters`, `title`, `description`, `customCode`, and `utmParameters`
+
+## [1.1.1] - 2026-02-12
+### Added
+- `CreateLinkResult` type — returns `url` (full shareable URL), `shortCode`, and `linkId`
+- Exported `CreateLinkOptions` and `CreateLinkResult` types from package entry point
+- Simplified link creation: when `templateId` is omitted, the SDK calls `POST /api/sdk/v1/links` which auto-selects the organization's default template — mobile apps no longer need to know template IDs or slugs
+
+## [1.1.0] - 2026-02-11
+
+### Added
+- Server-side URL resolution for deep links intercepted by App Links (Android) and Universal Links (iOS) — when the OS opens the app directly, the SDK now calls the resolve endpoint to retrieve custom parameters, UTM data, and link metadata
+- Device fingerprint collection sent with resolve requests for click attribution and deferred deep linking analytics
+- `deepLinkPath` and `appScheme` optional fields on `DeepLinkData` type
+- `ResolveFunction` type export for advanced SDK consumers
+
+### Changed
+- `DeepLinkHandler.handleDeepLink` is now async to support server-side URL resolution
+- `DeepLinkHandler.initialize` accepts an optional `resolveFn` parameter for URL resolution
+- `DeepLinkHandler.parseURL` now correctly extracts the short code from template URLs (e.g., `/templateSlug/shortCode`)
+- `AppInstallSDK.onDeepLink` automatically provides a resolver that calls the backend resolve endpoint
+- Deferred deep link responses now normalize `deepLinkParameters` from the backend into `customParameters` for a consistent interface across direct and deferred deep link paths
+
+### Fixed
+- Fixed deep links returning empty `customParameters` when the app was opened via App Links or Universal Links, where the OS intercepted the URL before the AppInstall server could append parameters via redirect
+
+## [1.0.1] - 2025-12-11
+
+- Initial release
+# 2.0.0 — AppInstall Go v2 migration
+
+- Replace the v1 install flow with persisted scoped instances, concurrent evidence collection, bounded foreground retries and immutable final caching.
+- Add Android/iOS native IO, Walle APK and Play collection; desktop receipt/launch/clipboard adapters.
+- Use compact v2 results, current probability fields, trusted install failover, bounded persistent event queues and isolated Linking listeners.
+- Rename the package/API to AppInstall, remove obsolete link-creation/admin APIs, release tooling and outdated examples.
+- Preserve source licenses. Native Apple builds require validation on a Mac.
+

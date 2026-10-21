@@ -1,0 +1,10 @@
+buildscript {
+    repositories { google(); mavenCentral() }
+    dependencies { classpath 'com.android.tools.build:gradle:8.11.1' }
+}
+ext.compileSdkVersion = 36
+allprojects {
+    configurations.configureEach {
+        resolutionStrategy.force 'com.facebook.react:react-android:0.81.5'
+    }
+}

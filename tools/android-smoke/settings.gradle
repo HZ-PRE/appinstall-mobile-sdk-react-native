@@ -1,0 +1,4 @@
+pluginManagement { repositories { google(); mavenCentral(); gradlePluginPortal() } }
+rootProject.name = 'AppInstallNativeSmoke'
+include ':sdk'
+project(':sdk').projectDir = file('../../android')
