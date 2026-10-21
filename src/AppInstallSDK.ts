@@ -3,12 +3,12 @@ import { AppState } from "react-native";
 import { AttributionContext } from "./AttributionContext";
 import { AttributionManager } from "./AttributionManager";
 import { DeepLinkHandler } from "./DeepLinkHandler";
-import { EventQueue } from "./EventQueue";
+import { EventQueue, utf8Bytes } from "./EventQueue";
 import { FingerprintCollector } from "./FingerprintCollector";
 import { NavigationTracker } from "./NavigationTracker";
 import { Sources, scope64 } from "./Sources";
 import { Transport } from "./Transport";
-import { configure, immutable } from "./protocol";
+import { configure, immutable, deadline, pending } from "./protocol";
 import { SDK_NAME, SDK_VERSION } from "./version";
 import type {
   AppInstallConfig,
@@ -27,7 +27,14 @@ export class AppInstallSDK {
   private nav?: NavigationTracker;
   private initialization?: Promise<InstallAttributionResponse>;
   private foreground?: { remove(): void };
-  private eventTimer?: ReturnType<typeof setInterval>;
+  private eventTimer?: ReturnType<typeof setTimeout>;
+  private eventPreparation?: Promise<void>;
+  private eventRecovery?: () => Promise<void>;
+  private eventSending?: Promise<void>;
+  private eventRetryMs = 1000;
+  private eventReservations = 0;
+  private eventReservedBytes = 0;
+  private directSeen = false;
   private deferred?: DeferredDeepLinkCallback;
   private direct?: DeepLinkCallback;
   private updated?: (r: InstallAttributionResponse) => void;
@@ -57,7 +64,12 @@ export class AppInstallSDK {
         return Promise.reject(
           new Error("Dispose the SDK before changing applications"),
         );
-      return this.initialization ?? this.getAttribution();
+      return this.initialization
+        ? this.boundedInitialization(
+            this.initialization,
+            config.initialAttributionTimeoutMs!,
+          )
+        : this.getAttribution();
     }
     this.config = config;
     this.scope = scope;
@@ -72,7 +84,29 @@ export class AppInstallSDK {
         if (this.initialization === task) this.initialization = undefined;
       });
     this.initialization = task;
-    return task;
+    return this.boundedInitialization(
+      task,
+      config.initialAttributionTimeoutMs!,
+    );
+  }
+  private async boundedInitialization(
+    task: Promise<InstallAttributionResponse>,
+    ms: number,
+  ): Promise<InstallAttributionResponse> {
+    // Convert task failures to values so only the deadline becomes a pending result.
+    const outcome = await deadline(
+      task.then(
+        (value) => ({ value }),
+        (error) => ({ error }),
+      ),
+      ms,
+    ).catch(() => ({
+      value: this.last
+        ? (JSON.parse(JSON.stringify(this.last)) as InstallAttributionResponse)
+        : pending("initial_response_pending"),
+    }));
+    if ("error" in outcome) throw outcome.error;
+    return outcome.value;
   }
   private async initialize(
     config: AppInstallConfig,
@@ -83,6 +117,11 @@ export class AppInstallSDK {
     this.last = undefined;
     this.delivered = false;
     this.eventsReady = false;
+    this.directSeen = false;
+    this.eventRetryMs = 1000;
+    this.eventSending = undefined;
+    this.eventPreparation = undefined;
+    this.eventRecovery = undefined;
     const source = new Sources(config, this.scope);
     this.transport = new Transport(config);
     this.context = new AttributionContext({
@@ -93,8 +132,12 @@ export class AppInstallSDK {
       "@appinstall:events:" + this.scope,
       this.transport,
     );
-    await Promise.all([this.context.load(), this.events.load()]);
+    const [, previous] = await Promise.all([
+      this.context.load(),
+      AsyncStorage.getItem(this.marker),
+    ]);
     if (epoch !== this.epoch) throw new Error("Initialization cancelled");
+    let validatedInstance: string | undefined;
     this.manager = new AttributionManager(
       config,
       source,
@@ -102,18 +145,31 @@ export class AppInstallSDK {
       () => FingerprintCollector.collect(),
       async (result, instance) => {
         if (epoch !== this.epoch) return;
-        const previous = await AsyncStorage.getItem(this.marker);
-        if (previous && previous !== instance) {
-          await this.events!.clear();
-          this.events = new EventQueue(
-            "@appinstall:events:" + this.scope,
-            this.transport!,
-          );
-          await this.context.clear();
+        if (validatedInstance !== instance) {
+          if (previous && previous !== instance && !this.directSeen)
+            await this.context.clear();
+          if (previous !== instance)
+            await AsyncStorage.setItem(this.marker, instance);
+          if (epoch !== this.epoch) return;
+          validatedInstance = instance;
+          const events = this.events!;
+          // Event recovery must not delay delivery of the durable install result.
+          this.eventRecovery = async () => {
+            if (previous && previous !== instance) {
+              await events.clear();
+              if (epoch !== this.epoch) return;
+              this.events = new EventQueue(
+                "@appinstall:events:" + this.scope,
+                this.transport!,
+              );
+            } else await events.load(result.installId);
+            if (epoch !== this.epoch) return;
+            this.eventsReady = true;
+            this.triggerEvents();
+          };
+          void this.prepareEvents().catch(() => {});
         }
-        await AsyncStorage.setItem(this.marker, instance);
         if (epoch !== this.epoch) return;
-        this.eventsReady = true;
         const changed = JSON.stringify(this.last) !== JSON.stringify(result);
         this.last = result;
         if (immutable(result) && result.attributed) {
@@ -127,7 +183,7 @@ export class AppInstallSDK {
             this.updated?.(JSON.parse(JSON.stringify(result)));
           } catch {}
         }
-        if (result.installId) void this.events?.flush().catch(() => {});
+        if (result.installId) this.triggerEvents();
       },
     );
     this.links = new DeepLinkHandler(config.baseUrl, config.appScheme, (path) =>
@@ -139,16 +195,12 @@ export class AppInstallSDK {
         .catch(() => {});
     });
     this.foreground = AppState.addEventListener("change", (state) => {
-      if (this.eventsReady && state === "active")
-        void this.events?.flush().catch(() => {});
+      if (state === "active") this.triggerEvents();
+      else {
+        clearTimeout(this.eventTimer);
+        this.eventTimer = undefined;
+      }
     });
-    this.eventTimer = setInterval(() => {
-      if (
-        this.eventsReady &&
-        (!AppState.currentState || AppState.currentState === "active")
-      )
-        void this.events?.flush().catch(() => {});
-    }, 30000);
     if (config.autoTrackNavigation && config.navigationRef) {
       const options =
         typeof config.autoTrackNavigation === "object"
@@ -171,7 +223,10 @@ export class AppInstallSDK {
     epoch: number,
   ): Promise<void> {
     if (epoch !== this.epoch) return;
-    if (data?.linkId) await this.context.recordDeepLinkOpen(data.linkId);
+    if (data?.linkId) {
+      this.directSeen = true;
+      await this.context.recordDeepLinkOpen(data.linkId);
+    }
     if (epoch === this.epoch) {
       try {
         this.direct?.(url, data);
@@ -209,7 +264,11 @@ export class AppInstallSDK {
     }
   }
   async getAttribution(): Promise<InstallAttributionResponse> {
-    if (this.initialization) return this.initialization;
+    if (this.initialization)
+      return this.boundedInitialization(
+        this.initialization,
+        this.config?.initialAttributionTimeoutMs ?? 1500,
+      );
     if (!this.config || !this.manager) throw new Error("Call init first");
     return this.manager.refresh();
   }
@@ -237,20 +296,34 @@ export class AppInstallSDK {
     if (!/^[A-Za-z0-9_.:-]{1,100}$/.test(name))
       throw new Error("Invalid event name");
     if (!this.last?.installId) return false;
-    const data = JSON.parse(JSON.stringify(properties));
-    if (JSON.stringify(data).length > 16384)
-      throw new Error("Event data too large");
-    const accepted = await this.events.add({
-      installId: this.last.installId,
-      eventName: name,
-      eventData: data,
-      timestamp: new Date().toISOString(),
-      ...this.context.getStamp(),
-      sdkName: SDK_NAME,
-      sdkVersion: SDK_VERSION,
-    });
-    if (accepted) await this.events.flush();
-    return accepted;
+    if (this.eventReservations >= 100) return false;
+    const serialized = JSON.stringify(properties);
+    const bytes = utf8Bytes(serialized);
+    if (bytes > 16384) throw new Error("Event data too large");
+    if (this.eventReservedBytes + bytes > 1024 * 1024) return false;
+    this.eventReservations++;
+    this.eventReservedBytes += bytes;
+    try {
+      const data = JSON.parse(serialized);
+      const epoch = this.epoch;
+      const event = {
+        installId: this.last.installId,
+        eventName: name,
+        eventData: data,
+        timestamp: new Date().toISOString(),
+        ...this.context.getStamp(),
+        sdkName: SDK_NAME,
+        sdkVersion: SDK_VERSION,
+      };
+      await this.prepareEvents();
+      if (epoch !== this.epoch || !this.eventsReady) return false;
+      const accepted = await this.events.add(event);
+      if (accepted) this.triggerEvents();
+      return accepted;
+    } finally {
+      this.eventReservations--;
+      this.eventReservedBytes -= bytes;
+    }
   }
   trackRevenue(
     amount: number,
@@ -266,7 +339,52 @@ export class AppInstallSDK {
     });
   }
   async flushEvents(): Promise<void> {
-    if (this.eventsReady) await this.events?.flush();
+    await this.prepareEvents();
+    if (this.eventsReady) await this.sendEvents();
+  }
+  private triggerEvents(): void {
+    if (
+      !this.eventsReady ||
+      !this.config ||
+      !this.last?.installId ||
+      !this.events?.count ||
+      (AppState.currentState && AppState.currentState !== "active") ||
+      this.eventTimer
+    )
+      return;
+    void this.sendEvents().catch(() => {});
+  }
+  private prepareEvents(): Promise<void> {
+    if (this.eventPreparation) return this.eventPreparation;
+    if (!this.config || !this.eventRecovery) return Promise.resolve();
+    const task = this.eventRecovery().catch((error) => {
+      if (this.eventPreparation === task) this.eventPreparation = undefined;
+      throw error;
+    });
+    this.eventPreparation = task;
+    return task;
+  }
+  private sendEvents(): Promise<void> {
+    if (this.eventSending) return this.eventSending;
+    clearTimeout(this.eventTimer);
+    this.eventTimer = undefined;
+    const epoch = this.epoch;
+    this.eventSending = this.events!.flush().finally(() => {
+      if (epoch !== this.epoch) return;
+      this.eventSending = undefined;
+      if (
+        this.events?.count &&
+        this.config &&
+        (!AppState.currentState || AppState.currentState === "active")
+      ) {
+        this.eventTimer = setTimeout(() => {
+          this.eventTimer = undefined;
+          this.triggerEvents();
+        }, this.eventRetryMs);
+        this.eventRetryMs = Math.min(60000, this.eventRetryMs * 2);
+      } else this.eventRetryMs = 1000;
+    });
+    return this.eventSending;
   }
   dispose(): void {
     this.epoch++;
@@ -275,12 +393,14 @@ export class AppInstallSDK {
     this.links?.cleanup();
     this.nav?.stop();
     this.foreground?.remove();
-    clearInterval(this.eventTimer);
+    clearTimeout(this.eventTimer);
+    this.eventTimer = undefined;
     this.config = undefined;
     this.draining = Promise.all([
       this.draining,
       this.manager?.drain(),
       this.events?.drain(),
+      this.eventPreparation?.catch(() => {}),
       this.directWork,
     ]).then(() => {});
   }

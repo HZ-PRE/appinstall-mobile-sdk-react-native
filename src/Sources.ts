@@ -191,11 +191,14 @@ export class Sources {
       : this.native!.writeState(this.scope, value);
   }
   async clearState(): Promise<void> {
+    this.release();
+    if (this.desktop) await AsyncStorage.removeItem(this.key);
+    else await this.native!.clearState(this.scope);
+  }
+  release(): void {
     this.generation++;
     this.jobs.clear();
     this.snapshot = { entries: {} };
-    if (this.desktop) await AsyncStorage.removeItem(this.key);
-    else await this.native!.clearState(this.scope);
   }
   async newId(): Promise<string> {
     if (!this.desktop) return this.native!.newInstanceId();
@@ -239,15 +242,33 @@ export class Sources {
       };
       let job = this.jobs.get(key);
       if (!job) {
+        const attempts = (this.snapshot.entries[key]?.attempts ?? 0) + 1;
         job = (async () => {
           try {
             const evidence = await deadline(read(), ms);
             if (gen === this.generation)
-              this.snapshot.entries[key] = { status: "complete", evidence };
+              this.snapshot.entries[key] = {
+                status: "complete",
+                evidence,
+                attempts,
+              };
           } catch (e) {
             if (gen === this.generation) {
+              // Only retry explicitly transient failures. Never retry permission denial.
+              const code = (e as { code?: string })?.code;
+              const transient =
+                code === "BACKGROUND" ||
+                code === "NOT_READY" ||
+                code === "TIMEOUT" ||
+                (e instanceof Error && e.message === "Operation timed out");
               this.snapshot.entries[key] = {
-                status: e instanceof SyntaxError ? "complete" : "unavailable",
+                status:
+                  e instanceof SyntaxError
+                    ? "complete"
+                    : transient && attempts < 3
+                      ? "pending"
+                      : "unavailable",
+                attempts,
               };
               if (e instanceof SyntaxError) this.snapshot.invalidSource = true;
             }

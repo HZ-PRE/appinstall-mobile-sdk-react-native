@@ -1,3 +1,16 @@
+## 2.0.1 (2026-10-21)
+
+- 修复剪贴板启动时暂未就绪被永久跳过、深链解析响应乱序及初始 URL 重复覆盖。
+- 事件容量在异步任务入队前限制，增加 UTF-8 字节预算；逐事件持久化、独立网络发送、发送任务合并和按需退避。
+- 事件持久化固定 eventId，配合 Go 数据库唯一索引实现重复上报去重。
+- 初始化等待覆盖存储阶段；事件恢复不阻塞最终归因；待定查询遵守服务端重试间隔。
+- iOS 文件 IO 移到串行后台队列；最终归因释放内存中的凭证快照。
+- trackEvent 在本地保存成功后返回，主动等待发送使用 flushEvents；不新增运行时依赖。
+
+## 2.0.0 (2026-10-21)
+
+- 对齐 AppInstall Flutter / Go v2：应用作用域、凭证来源、持久安装状态、最终结果缓存和桌面适配器。
+- 删除 v1 路由及客户端管理 API，增加 Android/iOS 原生桥和从零联测脚本。
 ## <small>1.6.2 (2026-10-19)</small>
 
 * fix(fingerprint): send the device language as language-region (#8) ([7c0569e](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/commit/7c0569e)), closes [#8](https://github.com/HZ-PRE/appinstall-mobile-sdk-react-native/issues/8) [en_ES_#u-fw-mon-mu-celsius](https://github.com/en_ES_/issues/u-fw-mon-mu-celsius)
@@ -104,4 +117,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use compact v2 results, current probability fields, trusted install failover, bounded persistent event queues and isolated Linking listeners.
 - Rename the package/API to AppInstall, remove obsolete link-creation/admin APIs, release tooling and outdated examples.
 - Preserve source licenses. Native Apple builds require validation on a Mac.
-

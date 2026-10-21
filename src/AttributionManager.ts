@@ -26,6 +26,7 @@ export class AttributionManager {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private failures = 0;
+  private nextAttemptAt = 0;
   private readonly started = Date.now();
   private listener?: { remove(): void };
   constructor(
@@ -61,6 +62,10 @@ export class AttributionManager {
     if (immutable(this.result)) return Promise.resolve(this.current!);
     if (this.inFlight)
       return this.inFlight.then((r) => JSON.parse(JSON.stringify(r)));
+    if (Date.now() < this.nextAttemptAt) {
+      this.armRetry();
+      return Promise.resolve(this.current ?? pending("retry_scheduled"));
+    }
     clearTimeout(this.timer);
     this.inFlight = this.perform().finally(() => {
       this.inFlight = undefined;
@@ -170,13 +175,17 @@ export class AttributionManager {
     );
     if (this.stopped) return pending("stopped");
     this.result = result;
+    if (immutable(result)) this.source.release();
     if (!immutable(result))
-      this.schedule(
-        Math.max(1000, Math.min(30000, result.retryAfterMs ?? 5000)),
-      );
+      this.schedule(Math.max(1000, result.retryAfterMs ?? 5000));
     return this.current!;
   }
   private schedule(ms: number): void {
+    this.nextAttemptAt =
+      Date.now() + ms + Math.floor(Math.random() * Math.max(1, ms / 5));
+    this.armRetry();
+  }
+  private armRetry(): void {
     if (
       this.stopped ||
       (AppState.currentState && AppState.currentState !== "active") ||
@@ -188,7 +197,7 @@ export class AttributionManager {
       () => {
         void this.refresh();
       },
-      ms + Math.floor(Math.random() * Math.max(1, ms / 5)),
+      Math.min(2147483647, Math.max(1, this.nextAttemptAt - Date.now())),
     );
   }
   dispose(): void {

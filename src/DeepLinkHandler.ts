@@ -5,6 +5,8 @@ import type { DeepLinkCallback, DeepLinkData, ResolveFunction } from "./types";
 export class DeepLinkHandler {
   private subscription?: { remove(): void };
   private generation = 0;
+  private sequence = 0;
+  private recent?: { url: string; at: number };
   private callback?: DeepLinkCallback;
   constructor(
     private readonly baseUrl: string,
@@ -15,17 +17,20 @@ export class DeepLinkHandler {
     this.cleanup();
     this.callback = callback;
     const gen = this.generation;
+    const initialSequence = this.sequence;
     this.subscription = Linking.addEventListener("url", ({ url }) => {
       void this.handle(url);
     });
     void Linking.getInitialURL()
       .then((url) => {
-        if (url && gen === this.generation) void this.handle(url);
+        if (url && gen === this.generation && initialSequence === this.sequence)
+          void this.handle(url);
       })
       .catch(() => {});
   }
   cleanup(): void {
     this.generation++;
+    this.recent = undefined;
     this.subscription?.remove();
     this.subscription = undefined;
     this.callback = undefined;
@@ -77,6 +82,9 @@ export class DeepLinkHandler {
     const local = this.parseURL(url),
       gen = this.generation;
     if (!local) return;
+    if (this.recent?.url === url && Date.now() - this.recent.at < 1000) return;
+    this.recent = { url, at: Date.now() };
+    const sequence = ++this.sequence;
     let data = local;
     try {
       const resolved = await this.resolve(
@@ -88,7 +96,7 @@ export class DeepLinkHandler {
           local.customParameters as Record<string, string>,
         );
     } catch {}
-    if (gen === this.generation) {
+    if (gen === this.generation && sequence === this.sequence) {
       try {
         this.callback?.(url, data);
       } catch {

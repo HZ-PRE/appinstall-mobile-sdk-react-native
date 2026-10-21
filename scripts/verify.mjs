@@ -45,9 +45,13 @@ run(
   process.execPath,
   [
     "tools/run-isolated-tests.mjs",
-    "-run",
-    "TestReactNativeEndToEnd",
-    "./integration",
+    ...(process.env.TEST_GO_ALL === "1"
+      ? ["./..."]
+      : [
+          "-run",
+          "TestReactNativeEndToEnd|TestEventIdempotency",
+          "./integration",
+        ]),
   ],
   process.env.TEST_GO_DIRECTORY,
   { ...process.env, TEST_REACT_NATIVE_SDK_DIRECTORY: root },

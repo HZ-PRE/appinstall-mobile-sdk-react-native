@@ -7,7 +7,12 @@
 @implementation AppInstallAttribution
 RCT_EXPORT_MODULE(AppInstallAttribution)
 + (BOOL)requiresMainQueueSetup { return NO; }
-- (dispatch_queue_t)methodQueue { return dispatch_get_main_queue(); }
+- (dispatch_queue_t)methodQueue {
+  static dispatch_queue_t queue;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{ queue = dispatch_queue_create("com.appinstall.state", DISPATCH_QUEUE_SERIAL); });
+  return queue;
+}
 - (NSURL *)file:(NSString *)scope error:(NSError **)error {
   if (!scope || scope.length > 4096) return nil;
   NSData *data = [scope dataUsingEncoding:NSUTF8StringEncoding];
@@ -23,6 +28,8 @@ RCT_EXPORT_MODULE(AppInstallAttribution)
 RCT_EXPORT_METHOD(readState:(NSString *)scope resolver:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
   NSError *error = nil; NSURL *file = [self file:scope error:&error];
   if (!file) { reject(@"INSTALL_IO", @"Installation state unavailable", nil); return; }
+  NSDictionary *attributes = [[NSFileManager defaultManager] attributesOfItemAtPath:file.path error:&error];
+  if (attributes && [attributes fileSize] > 262144) { reject(@"INSTALL_IO", @"Installation state too large", nil); return; }
   NSData *data = [NSData dataWithContentsOfURL:file options:0 error:&error];
   if (!data && error.code == NSFileReadNoSuchFileError) { resolve([NSNull null]); return; }
   NSString *text = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
@@ -45,9 +52,11 @@ RCT_EXPORT_METHOD(clearState:(NSString *)scope resolver:(RCTPromiseResolveBlock)
 RCT_EXPORT_METHOD(newInstanceId:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve([NSUUID UUID].UUIDString.lowercaseString); }
 RCT_EXPORT_METHOD(getTimezone:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve([NSTimeZone localTimeZone].name); }
 RCT_EXPORT_METHOD(readClipboard:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) {
+  dispatch_async(dispatch_get_main_queue(), ^{
   if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) { reject(@"BACKGROUND", @"Clipboard requires foreground", nil); return; }
   NSString *text = [UIPasteboard generalPasteboard].string;
   resolve(text && text.length <= 8192 ? text : [NSNull null]);
+  });
 }
 RCT_EXPORT_METHOD(readPackageSource:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve([NSNull null]); }
 RCT_EXPORT_METHOD(readReferrer:(RCTPromiseResolveBlock)resolve rejecter:(RCTPromiseRejectBlock)reject) { resolve(@{@"status": @"unavailable"}); }

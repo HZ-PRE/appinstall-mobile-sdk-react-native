@@ -19,7 +19,6 @@
  * The session is intentionally in-memory: a new JS context (cold start) is a new
  * session.
  *
- * See `.brandon/sit-237-auto-nav-tracking/plan.md` §0.2 / Phase D for the model.
  */
 
 import AsyncStorage from "@react-native-async-storage/async-storage";
@@ -135,7 +134,7 @@ export class AttributionContext {
 
   /** The current active attribution context, or null if none/organic. */
   getActive(): ActiveAttribution | null {
-    return this.active;
+    return this.active ? { ...this.active } : null;
   }
 
   /** Clear the persisted context and start a fresh session (used by clearData). */

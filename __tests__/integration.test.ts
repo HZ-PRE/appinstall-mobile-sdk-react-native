@@ -21,10 +21,27 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
       initialAttributionTimeoutMs: 10000,
     };
     const realFetch = globalThis.fetch;
-    const request = vi.fn(realFetch);
+    let loseEventAcknowledgement = false;
+    const request = vi.fn(async (...args: Parameters<typeof fetch>) => {
+      const response = await realFetch(...args);
+      // The server commits, then the connection loses its response. Retrying must not count twice.
+      if (String(args[0]).endsWith("/event") && loseEventAcknowledgement) {
+        loseEventAcknowledgement = false;
+        await response.text();
+        throw new Error("Simulated lost acknowledgement after commit");
+      }
+      return response;
+    });
     vi.stubGlobal("fetch", request);
     try {
-      for (const mode of ["clipboard", "apk", "play", "windows", "macos", "probability"]) {
+      for (const mode of [
+        "clipboard",
+        "apk",
+        "play",
+        "windows",
+        "macos",
+        "probability",
+      ]) {
         await AsyncStorage.clear();
         native.states.clear();
         rn.Platform.OS = ["windows", "macos"].includes(mode) ? mode : "android";
@@ -55,7 +72,8 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
           const first = await sdk.init(c);
           expect(first.attributed, mode).toBe(true);
           expect(first.isFinal, mode).toBe(true);
-          if (mode === 'probability') expect(first.attributionScope).toBe('probabilistic');
+          if (mode === "probability")
+            expect(first.attributionScope).toBe("probabilistic");
           if (!["windows", "macos"].includes(mode))
             expect(first.deepLinkData?.customParameters?.inviter).toBe(
               "rn-" + mode,
@@ -66,7 +84,11 @@ it.skipIf(!process.env.APPINSTALL_RN_FIXTURE)(
           const cached = await sdk.init(c);
           expect(cached).toEqual(first);
           expect(request.mock.calls.length).toBe(calls);
+          loseEventAcknowledgement = true;
           expect(await sdk.trackEvent("rn_e2e", { source: mode })).toBe(true);
+          await sdk.flushEvents();
+          expect(sdk.getQueuedEventCount()).toBe(1);
+          await sdk.flushEvents();
           expect(sdk.getQueuedEventCount()).toBe(0);
           await sdk.clearData();
         } finally {

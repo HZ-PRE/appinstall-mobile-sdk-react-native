@@ -2,6 +2,8 @@
 
 日期：2026-10-21（Asia/Shanghai）
 
+后续 2.0.1 优化与最新验收结果见 [OPTIMIZATION_REPORT.md](OPTIMIZATION_REPORT.md)。以下保留 2.0.0 初次迁移记录。
+
 项目：`F:/pro/toinstall/mobile-sdk-react-native`
 
 对齐参考：`F:/pro/toinstall/toinstall-mobile-sdk-flutter` 当前 AppInstall / Go v2 协议。
@@ -61,3 +63,4 @@
 
 运行时 JS 依赖仍只有 AsyncStorage 和 react-native-device-info；桌面示例使用的额外模块由桌面宿主按需提供。
 安装 tgz 或本地项目后须重新构建原生 App。服务端、落地页及专属包应统一使用 appinstall 凭证前缀。
+

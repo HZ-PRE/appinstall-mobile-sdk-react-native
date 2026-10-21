@@ -5,6 +5,9 @@ const store: Record<string, string> = {};
 vi.mock("@react-native-async-storage/async-storage", () => ({
   default: {
     getItem: vi.fn((key: string) => Promise.resolve(store[key] ?? null)),
+    multiGet: vi.fn((keys: string[]) =>
+      Promise.resolve(keys.map((key) => [key, store[key] ?? null])),
+    ),
     setItem: vi.fn((key: string, value: string) => {
       store[key] = value;
       return Promise.resolve();
