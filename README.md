@@ -1,6 +1,4 @@
 # AppInstall React Native SDK
-
-与当前 `appinstall_flutter` / Go 服务对齐的 v2 客户端。包名为
 `@appinstall/mobile-sdk-react-native`，本仓库尚未发布到 npm，请使用本地路径或打包后的 tgz。
 
 ## 接入
@@ -81,41 +79,6 @@ await AppInstall.trackEvent('signup', {channel: 'app'});
 2.  **Custom URL Schemes**: Add your scheme in `Info.plist` under URL Types.
 3.  **AASA File**: Ensure your `.well-known/apple-app-site-association` is hosted on your domain.
 
-## 归因流程
-
-1. 以服务地址、应用 ID、appScheme 隔离安装状态、事件和最后点击上下文。
-2. 先生成并持久化安装实例 ID，再请求服务端。Android 状态使用 no-backup 目录及 AtomicFile；
-   iOS 使用原子写入并排除备份。写入失败时不会直接上报一个未持久化实例。
-3. Android 并行读取剪贴板、Walle 包内凭证和 Google Play Install Referrer。
-   首次只等待采集 200 ms，慢来源保持 pending，后续补齐；Play 最多尝试三次。
-   剪贴板暂未前台就绪或超时保持 pending，最多尝试三次；明确拒绝或不支持则停止读取。
-4. iOS 收集剪贴板及概率匹配参数，APK / Play 标记 unavailable。不会伪造不可用来源。
-5. 上传 `/api/sdk/v2/install`，匹配优先级、阈值、降级与凭证冲突由 Go 服务决定。
-   SDK 不解密剪贴板、不持有密钥，仅接受本应用格式正确的密文。无关剪贴板不持久化或上传。
-6. 按服务端建议重试，单次启动自动重试窗口 10 分钟，后台暂停定时重试，回前台可继续。
-   频繁调用获取方法不会绕过 `retryAfterMs`。初始等待预算从 `init()` 开始计时，超时先返回 pending；事件队列恢复不阻塞最终归因返回。
-   永久 HTTP 配置错误不自动轮询。可配置最多两个同一部署的可信 HTTPS 副本，只有安装请求故障切换。
-7. 最终结果先写盘再交给 App；最终状态移除凭证和指纹快照。应用卸载/显式清理开始新实例。
-
-概率信号包含平台、版本、App 版本、完整显示屏物理尺寸、DPR、时区、时区偏移、语言列表、
-Android 型号/ABI 家族及采集时间。不会自动采集广告 ID、设备永久 ID；可在同意后显式传入 `deviceId`。
-匹配无法保证 100%，没有有效证据时可能保持 pending 或最终 unmatched。
-
-## 事件、深链与生命周期
-
-- 事件使用 `/api/sdk/v2/event`，队列最多 100 条且序列化内容不超过 1 MiB，等待写盘的事件也计入容量；事件业务参数上限为 16 KiB UTF-8。
-  每条事件单独落盘，网络发送与入队分离。`trackEvent` 在本地保存成功后返回 true，不等待网络确认；`flushEvents()` 可主动等待一次发送过程结束。
-  无服务端 installId 或容量已满时返回 false，存储失败抛错。`getQueuedEventCount()` 可查看剩余数。
-  有积压才启动前台退避重试（1 秒至 60 秒），空队列不设定时器；回到前台触发发送。401/403 等配置错误保留事件，400/413/422 的无效事件丢弃以免阻塞队列。
-  每条事件持久化固定 `eventId`；配套 Go 服务迁移新增 `(install_id, client_event_id)` 唯一索引，重试返回同一确认且不重复创建 Webhook 任务。传输仍是至少一次；Webhook 接收方仍需按事件 ID 去重。
-- `onDeepLink` 自动接收 Linking 初始链接及后续事件。仅接受配置的服务地址或 appScheme，
-  通过 `/api/sdk/v2/resolve/:shortCode` 补全数据，失败则保留本地参数。凭证字段不会混入业务参数。
-  连续链接按收到顺序判断新旧，迟到响应不覆盖新链接；1 秒内重复 URL 合并，迟到的初始 URL 不覆盖实时打开的链接。
-- 支持 `autoTrackNavigation` + `navigationRef`，页面参数默认不采集，可显式指定 allow-list。
-- `dispose()` 停止本 SDK 的监听和重试，保留磁盘状态；再次 init 会等待旧请求收尾。
-  `clearData()` 还会等待正在进行的请求后清理本作用域状态，供测试或显式重置使用。
-- 多应用可分别创建 `new AppInstallSDK()`；同一个对象切换应用前先 dispose。
-
 ## Windows / macOS
 
 共享 v2 状态机、概率信号、最终缓存，支持 `launch_uri`、加密剪贴板和 `install_file`。
@@ -133,16 +96,6 @@ macOS 默认读取 `<宿主 Application Support>/appinstall/<appScheme>/install.
 可通过 `desktopReceiptPath` 指定与安装器一致的绝对路径，读取限制 2048 字节。
 无适配器时文件/剪贴板来源 unavailable，仍可使用启动 URI 和概率匹配。
 桌面持久化依赖宿主 AsyncStorage，不保证卸载时一定删除桌面用户数据目录。
-
-## 与原 SDK 的差异
-
-- 仅保留 Go v2 安装、事件和解析接口，删除旧 v1 首次启动标记和诊断字段。
-- `AppInstallConfig.attributionWindowHours` 默认 24 小时，不再使用旧的按天参数。
-- 删除客户端创建短链接及管理端授权功能：当前服务端每个应用只有一个后台管理的链接，短标识由后台生成。
-- 新凭证前缀为 `appinstall`，与 Go、落地页 JS、专属包同步更新。
-- 去除上游自动发布配置、semantic-release 工具依赖和失效示例。保留 MIT / Walle 版权许可证。
-- 未增加运行时 JS 依赖，仍仅依赖 AsyncStorage 和 react-native-device-info；
-  Android 额外原生依赖只有实际使用的 Install Referrer。
 
 ## 测试
 
