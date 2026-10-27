@@ -44,7 +44,7 @@ export interface NavigationContainerRefLike {
 }
 export interface DeviceFingerprint {
   userAgent: string;
-  /** Human-readable brand/model/device code; not a unique device identifier. */
+  /** Brand/model metadata, or Microsoft Windows name and OS build; not a unique ID. */
   equipment?: string;
   platform: string;
   platformVersion?: string;

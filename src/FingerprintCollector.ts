@@ -93,7 +93,7 @@ export class FingerprintCollector {
       if (normalizedVersion !== "Unknown")
         signals.osVersion = normalizedVersion;
     }
-    // Use model metadata only; never getDeviceName (user-editable hostname) or unique IDs.
+    // Use hardware metadata or the Windows OS build; never hostnames or unique IDs.
     let equipment: string | undefined;
     try {
       equipment = this.formatEquipment(
@@ -105,10 +105,14 @@ export class FingerprintCollector {
             ]
           : ["ios", "macos"].includes(platform)
             ? ["Apple", DeviceInfo.getModel(), DeviceInfo.getDeviceId()]
-            : [
-                platform === "windows" ? "Windows" : platform,
-                normalizedVersion,
-              ],
+            : platform === "windows"
+              ? [
+                  "Microsoft",
+                  "Windows",
+                  normalizedVersion,
+                  /^(\d+\.\d+\.\d+)(?:\.\d+)?$/.exec(version)?.[1] ?? "",
+                ]
+              : [platform, normalizedVersion],
       );
     } catch {
       // Optional metadata must not prevent installation attribution.

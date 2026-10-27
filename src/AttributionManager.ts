@@ -50,10 +50,11 @@ export class AttributionManager {
     return this.result ? JSON.parse(JSON.stringify(this.result)) : undefined;
   }
   async start(): Promise<InstallAttributionResponse> {
-    this.listener = AppState.addEventListener("change", (state) => {
-      if (state !== "active") clearTimeout(this.timer);
-      else if (!immutable(this.result)) void this.refresh();
-    });
+    if (!this.stopped && !this.listener && !immutable(this.result))
+      this.listener = AppState.addEventListener("change", (state) => {
+        if (state !== "active") clearTimeout(this.timer);
+        else if (!immutable(this.result)) void this.refresh();
+      });
     try {
       return await deadline(
         this.refresh(),
@@ -213,7 +214,12 @@ export class AttributionManager {
     );
     if (this.stopped) return pending("stopped");
     this.result = result;
-    if (immutable(result)) this.source.release();
+    if (immutable(result)) {
+      this.source.release();
+      clearTimeout(this.timer);
+      this.listener?.remove();
+      this.listener = undefined;
+    }
     if (!immutable(result))
       this.schedule(Math.max(1000, result.retryAfterMs ?? 5000));
     return this.current!;

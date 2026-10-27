@@ -4,6 +4,7 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Sources } from "../src/Sources";
 import { AttributionManager } from "../src/AttributionManager";
 import { FingerprintCollector } from "../src/FingerprintCollector";
+import DeviceInfo from "react-native-device-info";
 import { Transport, HttpError } from "../src/Transport";
 import { configure } from "../src/protocol";
 import { AppInstallSDK } from "../src/AppInstallSDK";
@@ -74,6 +75,17 @@ function manager(
   managers.push(m);
   return { m, source, request, accept };
 }
+it("repeated starts share a lifecycle listener and final attribution releases it", async () => {
+  const { m } = manager();
+  await Promise.all([m.start(), m.start()]);
+  expect(rn.AppState.addEventListener).toHaveBeenCalledTimes(1);
+  const subscription = rn.AppState.addEventListener.mock.results[0].value;
+  expect(subscription.remove).toHaveBeenCalledTimes(1);
+  await m.start();
+  m.dispose();
+  expect(rn.AppState.addEventListener).toHaveBeenCalledTimes(1);
+  expect(subscription.remove).toHaveBeenCalledTimes(1);
+});
 it("concurrent requests coalesce, commit precedes response, final data survives restart without HTTP", async () => {
   const { m, request } = manager();
   const values = await Promise.all([m.refresh(), m.refresh(), m.refresh()]);
@@ -229,6 +241,30 @@ it("fingerprint uses full physical display and current optional signals", async 
   expect(fp.timezone).toBe("Asia/Shanghai");
   expect(fp.language).toBe("zh-CN");
 });
+it.each([
+  ["10.0.19045", "10", "Microsoft Windows 10 10.0.19045"],
+  ["10.0.22621", "11", "Microsoft Windows 11 10.0.22621"],
+  ["10.0.26100.1000", "11", "Microsoft Windows 11 10.0.26100"],
+  ["unknown", "Unknown", "Microsoft Windows"],
+])(
+  "Windows equipment includes the OS build: %s",
+  async (version, release, expected) => {
+    rn.Platform.OS = "windows";
+    const versionMock = vi
+      .spyOn(DeviceInfo, "getSystemVersion")
+      .mockReturnValue(version);
+    try {
+      const fp = await FingerprintCollector.collect();
+      expect(fp.equipment).toBe(expected);
+      expect(fp.platformVersion).toBe(release);
+      const { m, request } = manager();
+      await m.refresh();
+      expect(request.mock.calls[0][1]).toHaveProperty("equipment", expected);
+    } finally {
+      versionMock.mockRestore();
+    }
+  },
+);
 it("equipment is bounded model metadata and travels in the installation body", async () => {
   expect(
     FingerprintCollector.formatEquipment([" HUAWEI ", "BRQ-AN00", "HWBRQ"]),

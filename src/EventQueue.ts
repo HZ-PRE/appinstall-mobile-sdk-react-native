@@ -5,9 +5,19 @@ const MAX_EVENTS = 100;
 const MAX_BYTES = 1024 * 1024;
 export function utf8Bytes(value: string): number {
   let bytes = 0;
-  for (const char of value) {
-    const code = char.codePointAt(0)!;
-    bytes += code <= 0x7f ? 1 : code <= 0x7ff ? 2 : code <= 0xffff ? 3 : 4;
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code <= 0x7f) bytes++;
+    else if (code <= 0x7ff) bytes += 2;
+    else if (
+      code >= 0xd800 &&
+      code <= 0xdbff &&
+      value.charCodeAt(i + 1) >= 0xdc00 &&
+      value.charCodeAt(i + 1) <= 0xdfff
+    ) {
+      bytes += 4;
+      i++;
+    } else bytes += 3;
   }
   return bytes;
 }
@@ -199,6 +209,8 @@ export class EventQueue {
     this.stop();
     await this.sending?.catch(() => {});
     await this.serial;
+    this.entries = [];
+    this.bytes = 0;
   }
   async clear(): Promise<void> {
     await this.drain();

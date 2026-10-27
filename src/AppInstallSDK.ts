@@ -396,6 +396,7 @@ export class AppInstallSDK {
     this.epoch++;
     this.manager?.dispose();
     this.events?.stop();
+    this.transport?.close();
     this.links?.cleanup();
     this.nav?.stop();
     this.foreground?.remove();

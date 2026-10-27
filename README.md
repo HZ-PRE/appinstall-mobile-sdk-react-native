@@ -83,6 +83,8 @@ await AppInstall.trackEvent('signup', {channel: 'app'});
 
 ## Windows / macOS
 
+Windows 的 `equipment` 自动上传 `Microsoft + Windows 系统名称 + 主版本号.次版本号.构建号`，例如 `Microsoft Windows 11 10.0.26100`；不附加第四段修订号。`platform` 和 `platformVersion` 保持原有语义，macOS 继续使用 Apple 机型信息。成功标记仍阻止重复安装归因请求，不会为此字段额外补传。
+
 共享 v2 状态机、概率信号、成功标记，支持 `launch_uri`、加密剪贴板和 `install_file`。
 React Native 桌面宿主通过 `createDesktopAdapter` 绑定自己使用的文件系统和剪贴板模块，
 具体示例见 `examples/DesktopAdapter.ts`。手机接入不需要这些桌面依赖。
